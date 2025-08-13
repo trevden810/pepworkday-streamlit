@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 import altair as alt
 import pydeck as pdk
+import sys
+import os
 from data_loader import load_data, load_filemaker_data, load_samsara_fleet_data, load_combined_fleet_data
 
 # Create sample raw_df with driver and miles data
@@ -65,6 +67,20 @@ def convert_combined_to_driver_format(combined_df):
 
 st.set_page_config(page_title='PEP Workday - Fleet Management Dashboard', layout='wide')
 st.title('PEP Workday - Fleet Management Dashboard')
+
+# Debug output
+st.write("### Debug Information")
+st.write("Python version:", sys.version)
+st.write("Current working directory:", os.getcwd())
+try:
+    st.write("FileMaker connection test:", load_filemaker_data("test"))
+except Exception as e:
+    st.error(f"FileMaker connection failed: {str(e)}")
+    
+try:
+    st.write("Samsara connection test:", load_samsara_fleet_data())
+except Exception as e:
+    st.error(f"Samsara connection failed: {str(e)}")
 
 # Initialize tabs at the top
 tab1, tab2, tab3, tab4 = st.tabs(["Jobs Overview", "Fleet Map", "Assignments", "Analytics"])
