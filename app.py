@@ -65,40 +65,62 @@ def convert_combined_to_driver_format(combined_df):
     # For now, just use the combined data as is, but convert to driver format
     return convert_samsara_to_driver_format(combined_df)
 
+# Set up the page configuration
 st.set_page_config(page_title='PEP Workday - Fleet Management Dashboard', layout='wide')
-st.title('PEP Workday - Fleet Management Dashboard')
 
-# Debug output
-st.write("### Debug Information")
-st.write("Python version:", sys.version)
-st.write("Current working directory:", os.getcwd())
-try:
-    st.write("FileMaker connection test:", load_filemaker_data("test"))
-except Exception as e:
-    st.error(f"FileMaker connection failed: {str(e)}")
+# Add role selection to the sidebar
+st.sidebar.header('User Role Selection')
+user_role = st.sidebar.selectbox(
+    'Select your role',
+    ['CSR', 'Dispatcher', 'Operations Manager']
+)
+
+# Add a simple alert system
+def show_alerts():
+    """Display alerts based on data conditions."""
+    # In a real implementation, these would be based on actual data conditions
+    alerts = []
     
-try:
-    st.write("Samsara connection test:", load_samsara_fleet_data())
-except Exception as e:
-    st.error(f"Samsara connection failed: {str(e)}")
+    # Example alerts (in a real app, these would be dynamic based on data)
+    if user_role == 'Dispatcher':
+        alerts.append(("warning", "Driver John Smith is running 30 minutes behind schedule"))
+        alerts.append(("info", "New job assignment available for Driver Jane Doe"))
+    elif user_role == 'Operations Manager':
+        alerts.append(("error", "Truck #245 requires immediate maintenance"))
+        alerts.append(("warning", "Capacity at 85% for tomorrow's schedule"))
+        alerts.append(("info", "New driver certification completed"))
+    elif user_role == 'CSR':
+        alerts.append(("info", "Customer ABC Corp has a scheduled job today"))
+        alerts.append(("warning", "Job #603142 requires a callback"))
+    
+    # Display alerts
+    if alerts:
+        st.sidebar.header("Alerts")
+        for alert_type, message in alerts:
+            if alert_type == "error":
+                st.sidebar.error(f"🚨 {message}")
+            elif alert_type == "warning":
+                st.sidebar.warning(f"⚠️ {message}")
+            elif alert_type == "info":
+                st.sidebar.info(f"ℹ️ {message}")
+
+# Show alerts in the sidebar
+show_alerts()
+
+# Set the title based on the selected role
+if user_role == 'CSR':
+    st.title('PEP Workday - Customer Service Dashboard')
+elif user_role == 'Dispatcher':
+    st.title('PEP Workday - Dispatch Dashboard')
+elif user_role == 'Operations Manager':
+    st.title('PEP Workday - Operations Management Dashboard')
+else:
+    st.title('PEP Workday - Fleet Management Dashboard')
+
 
 # Initialize tabs at the top
 tab1, tab2, tab3, tab4 = st.tabs(["Jobs Overview", "Fleet Map", "Assignments", "Analytics"])
 
-# Add connection status indicators
-st.sidebar.header("API Connection Status")
-
-# Check FileMaker connection
-try:
-    st.sidebar.success("✅ FileMaker API Connected")
-except Exception as e:
-    st.sidebar.error(f"❌ FileMaker API Error: {str(e)}")
-
-# Check Samsara connection
-try:
-    st.sidebar.success("✅ Samsara API Connected")
-except Exception as e:
-    st.sidebar.error(f"❌ Samsara API Error: {str(e)}")
 
 # Add data source selection
 st.sidebar.header('Data Source Selection')
@@ -125,70 +147,125 @@ with col2:
         with st.spinner('Fetching fresh data from APIs...'):
             # Clear relevant caches
             st.cache_data.clear()
+            # Also clear session state to force reload
+            if 'df' in st.session_state:
+                del st.session_state.df
+            if 'raw_df' in st.session_state:
+                del st.session_state.raw_df
             
             # Force fresh API calls
+            api_success = True
             try:
                 # Get fresh Samsara data
                 samsara_df = load_samsara_fleet_data()
-                if samsara_df is not None:
+                if samsara_df is not None and not samsara_df.empty:
                     st.sidebar.success("✅ Successfully pulled Samsara data")
                 else:
-                    st.sidebar.warning("⚠️ Samsara data pull failed")
+                    st.sidebar.warning("⚠️ Samsara data pull returned no data")
+                    api_success = False
                 
-                # Get fresh FileMaker data if job_id exists
-                if 'job_id' in locals():
+                # Get fresh FileMaker data if job_id exists and FileMaker is selected
+                if data_source == 'FileMaker Job Data' and 'job_id' in locals():
                     fm_df = load_filemaker_data(job_id)
-                    if fm_df is not None:
+                    if fm_df is not None and not fm_df.empty:
                         st.sidebar.success(f"✅ Successfully pulled FileMaker data for job {job_id}")
                     else:
-                        st.sidebar.warning("⚠️ FileMaker data pull failed")
+                        st.sidebar.warning("⚠️ FileMaker data pull returned no data")
+                        api_success = False
+                
+                if api_success:
+                    st.success("✅ All API data refreshed successfully")
+                else:
+                    st.warning("⚠️ Some API calls returned no data. Using available data.")
+                
+                # Mark data as not loaded to force reload
+                if 'data_loaded' in st.session_state:
+                    del st.session_state.data_loaded
                 
                 st.rerun()
             except Exception as e:
                 st.sidebar.error(f"❌ API pull failed: {str(e)}")
+                st.error("Failed to refresh API data. Please check your connection and credentials.")
 
-# Load data based on selection
+# Load data based on selection with improved error handling and lazy loading
 df = None
 raw_df = None
 
-if data_source == 'FileMaker Job Data':
-    with st.spinner('Loading FileMaker data...'):
-        df = load_filemaker_data(job_id) if 'job_id' in locals() else load_data()
-        if df is not None:
-            st.success(f"✅ Loaded FileMaker data for job {job_id}")
-        else:
-            st.warning("⚠️ Failed to load FileMaker data, using sample data")
-            df = load_data()
-            # Create sample raw_df with driver and miles data
-            raw_df = create_sample_df()
-elif data_source == 'Samsara Fleet Data':
-    with st.spinner('Loading Samsara fleet data...'):
-        samsara_df = load_samsara_fleet_data()
-        if samsara_df is not None:
-            df = samsara_df
-            st.success("✅ Loaded Samsara fleet data")
-            # Convert Samsara data to format compatible with existing visualizations
-            raw_df = convert_samsara_to_driver_format(samsara_df)
-        else:
-            st.warning("⚠️ Failed to load Samsara data, using sample data")
-            df = load_data()
-            raw_df = create_sample_df()
-elif data_source == 'Combined Data':
-    with st.spinner('Loading combined fleet data...'):
-        combined_df = load_combined_fleet_data()
-        if combined_df is not None:
-            df = combined_df
-            st.success("✅ Loaded combined fleet data")
-            # Convert combined data to format compatible with existing visualizations
-            raw_df = convert_combined_to_driver_format(combined_df)
-        else:
-            st.warning("⚠️ Failed to load combined data, using sample data")
-            df = load_data()
-            raw_df = create_sample_df()
-else:
-    # Sample data
-    df = load_data()
-    raw_df = create_sample_df()
+# Only load data when needed (lazy loading)
+data_loaded = st.session_state.get('data_loaded', False)
+current_data_source = st.session_state.get('data_source', None)
+
+# Check if we need to load data (either first time or data source changed)
+if not data_loaded or current_data_source != data_source:
+    st.session_state.data_loaded = True
+    st.session_state.data_source = data_source
+    st.session_state.df = None
+    st.session_state.raw_df = None
+
+# Load data if not already in session state
+if 'df' not in st.session_state or st.session_state.df is None:
+    if data_source == 'FileMaker Job Data':
+        with st.spinner('Loading FileMaker data...'):
+            try:
+                df = load_filemaker_data(job_id) if 'job_id' in locals() else load_data()
+                if df is not None and not df.empty:
+                    st.success(f"✅ Loaded FileMaker data for job {job_id}")
+                    st.session_state.df = df
+                    # Create sample raw_df with driver and miles data for visualization
+                    st.session_state.raw_df = create_sample_df()  # Using sample for now, could convert actual data
+                else:
+                    st.warning("⚠️ No data found for this job ID or failed to load FileMaker data, using sample data")
+                    st.session_state.df = load_data()
+                    st.session_state.raw_df = create_sample_df()
+            except Exception as e:
+                st.error(f"❌ Error loading FileMaker data: {str(e)}")
+                st.info("Using sample data as fallback")
+                st.session_state.df = load_data()
+                st.session_state.raw_df = create_sample_df()
+    elif data_source == 'Samsara Fleet Data':
+        with st.spinner('Loading Samsara fleet data...'):
+            try:
+                samsara_df = load_samsara_fleet_data()
+                if samsara_df is not None and not samsara_df.empty:
+                    st.success("✅ Loaded Samsara fleet data")
+                    st.session_state.df = samsara_df
+                    # Convert Samsara data to format compatible with existing visualizations
+                    st.session_state.raw_df = convert_samsara_to_driver_format(samsara_df)
+                else:
+                    st.warning("⚠️ No Samsara data available or failed to load, using sample data")
+                    st.session_state.df = load_data()
+                    st.session_state.raw_df = create_sample_df()
+            except Exception as e:
+                st.error(f"❌ Error loading Samsara data: {str(e)}")
+                st.info("Using sample data as fallback")
+                st.session_state.df = load_data()
+                st.session_state.raw_df = create_sample_df()
+    elif data_source == 'Combined Data':
+        with st.spinner('Loading combined fleet data...'):
+            try:
+                combined_df = load_combined_fleet_data()
+                if combined_df is not None and not combined_df.empty:
+                    st.success("✅ Loaded combined fleet data")
+                    st.session_state.df = combined_df
+                    # Convert combined data to format compatible with existing visualizations
+                    st.session_state.raw_df = convert_combined_to_driver_format(combined_df)
+                else:
+                    st.warning("⚠️ No combined data available or failed to load, using sample data")
+                    st.session_state.df = load_data()
+                    st.session_state.raw_df = create_sample_df()
+            except Exception as e:
+                st.error(f"❌ Error loading combined data: {str(e)}")
+                st.info("Using sample data as fallback")
+                st.session_state.df = load_data()
+                st.session_state.raw_df = create_sample_df()
+    else:
+        # Sample data
+        st.session_state.df = load_data()
+        st.session_state.raw_df = create_sample_df()
+
+# Use data from session state
+df = st.session_state.df
+raw_df = st.session_state.raw_df
 
 # Data processing functions with caching
 @st.cache_data
@@ -243,92 +320,242 @@ if raw_df is None:
     raw_df = create_sample_df()
 
 with tab1:
-    # Jobs Overview Tab
-    st.header("Job Dispatch Overview")
-    
-    # Job data display
-    if df is not None:
-        st.dataframe(df, use_container_width=True)
+    # Jobs Overview Tab - Customized based on user role
+    if user_role == 'CSR':
+        st.header("Today's Jobs")
+        st.markdown("Quick access to customer and job information for today's jobs.")
+        
+        # Add a search box for job/customer lookup
+        search_term = st.text_input("Search jobs by ID, customer, or address", "")
+        
+        # Filter data based on search term if provided
+        if search_term and df is not None:
+            # Try to filter the dataframe based on search term
+            filtered_df = df[df.astype(str).apply(lambda x: x.str.contains(search_term, case=False)).any(axis=1)]
+            if not filtered_df.empty:
+                st.dataframe(filtered_df, use_container_width=True)
+            else:
+                st.info("No jobs found matching your search criteria.")
+        elif df is not None:
+            # Show today's jobs (for now, showing all data)
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.warning("No job data available")
+            
+    elif user_role == 'Dispatcher':
+        st.header("Job Dispatch Overview")
+        st.markdown("View job details and status for all active jobs.")
+        
+        # Job data display
+        if df is not None:
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.warning("No job data available")
+            
+    elif user_role == 'Operations Manager':
+        st.header("Live Schedule")
+        st.markdown("View and manage the live schedule for all jobs.")
+        
+        # Show schedule view
+        if df is not None:
+            # For now, showing the same data but with different context
+            st.dataframe(df, use_container_width=True)
+            st.markdown("Use the controls below to block parts of the schedule or adjust capacity planning.")
+        else:
+            st.warning("No schedule data available")
     else:
-        st.warning("No job data available")
-    
-    # Interactive checklist
-    st.markdown("### Task Checklist")
-    checklist_conditions = get_checklist_conditions(df)
-    completion_status = checklist_conditions['completion_status']
-    notes_flag = checklist_conditions['notes_flag']
-    in_progress_flag = checklist_conditions['in_progress_flag']
-
-    # Create checkboxes for each row in the DataFrame
-    if len(df) > 0:
-        for i in range(min(len(df), 10)):  # Limit to first 10 rows
-            col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
-            
-            with col1:
-                # Show relevant data based on data source
-                if 'job_id' in df.columns:
-                    st.write(f"Job: {df.iloc[i].get('job_id', f'Row {i}')}")
-                elif 'name' in df.columns:
-                    st.write(f"Vehicle: {df.iloc[i].get('name', f'Row {i}')}")
-                else:
-                    st.write(f"Task {i+1} (Row {i})")
-            
-            with col2:
-                completed = st.checkbox(
-                    "Completed", 
-                    value=completion_status.iloc[i] if i < len(completion_status) else False, 
-                    key=f"completed_{i}"
-                )
-            
-            with col3:
-                has_notes = st.checkbox(
-                    "Has Notes", 
-                    value=notes_flag.iloc[i] if i < len(notes_flag) else False, 
-                    key=f"notes_{i}"
-                )
-            
-            with col4:
-                in_progress = st.checkbox(
-                    "In Progress",
-                    value=in_progress_flag.iloc[i] if i < len(in_progress_flag) else False,
-                    key=f"progress_{i}"
-                )
-    else:
-        st.info("No data available for checklist")
+        # Default view
+        st.header("Job Dispatch Overview")
+        
+        # Job data display
+        if df is not None:
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.warning("No job data available")
 
 with tab2:
-    # Fleet Map Tab
-    st.header("Fleet Locations")
-    if df is not None and 'latitude' in df.columns and 'longitude' in df.columns:
-        st.pydeck_chart(pdk.Deck(
-            map_style='mapbox://styles/mapbox/light-v9',
-            initial_view_state=pdk.ViewState(
-                latitude=df['latitude'].mean(),
-                longitude=df['longitude'].mean(),
-                zoom=11,
-                pitch=50,
-            ),
-            layers=[
-                pdk.Layer(
-                    'ScatterplotLayer',
-                    data=df,
-                    get_position='[longitude, latitude]',
-                    get_color='[200, 30, 0, 160]',
-                    get_radius=200,
+    # Fleet Map Tab - Customized based on user role
+    if user_role == 'Dispatcher':
+        st.header("Technician Locations")
+        st.markdown("Live map showing technician locations and job details.")
+        
+        if df is not None and 'latitude' in df.columns and 'longitude' in df.columns:
+            # Create a more detailed map with job information
+            map_data = df[['latitude', 'longitude']].copy()
+            if 'job_id' in df.columns:
+                map_data['job_id'] = df['job_id']
+            if 'driver' in df.columns:
+                map_data['driver'] = df['driver']
+            if 'status' in df.columns:
+                map_data['status'] = df['status']
+            
+            st.pydeck_chart(pdk.Deck(
+                map_style='mapbox://styles/mapbox/light-v9',
+                initial_view_state=pdk.ViewState(
+                    latitude=df['latitude'].mean(),
+                    longitude=df['longitude'].mean(),
+                    zoom=11,
+                    pitch=50,
                 ),
-            ],
-        ))
+                layers=[
+                    pdk.Layer(
+                        'ScatterplotLayer',
+                        data=map_data,
+                        get_position='[longitude, latitude]',
+                        get_color='[200, 30, 0, 160]',
+                        get_radius=200,
+                        pickable=True,
+                        auto_highlight=True,
+                    ),
+                ],
+                tooltip={
+                    "html": "<b>Job ID:</b> {job_id}<br/><b>Driver:</b> {driver}<br/><b>Status:</b> {status}",
+                    "style": {"backgroundColor": "steelblue", "color": "white"}
+                }
+            ))
+        else:
+            st.warning("Location data not available")
+    elif user_role == 'Operations Manager':
+        st.header("Fleet Locations")
+        st.markdown("Live map showing fleet locations with capacity planning indicators.")
+        
+        if df is not None and 'latitude' in df.columns and 'longitude' in df.columns:
+            # Create a map with capacity planning indicators
+            map_data = df[['latitude', 'longitude']].copy()
+            if 'driver' in df.columns:
+                map_data['driver'] = df['driver']
+            if 'truck_id' in df.columns:
+                map_data['truck_id'] = df['truck_id']
+            # Add a simple capacity indicator (for now, just showing all vehicles)
+            map_data['capacity'] = 100  # Placeholder for capacity percentage
+            
+            st.pydeck_chart(pdk.Deck(
+                map_style='mapbox://styles/mapbox/light-v9',
+                initial_view_state=pdk.ViewState(
+                    latitude=df['latitude'].mean(),
+                    longitude=df['longitude'].mean(),
+                    zoom=11,
+                    pitch=50,
+                ),
+                layers=[
+                    pdk.Layer(
+                        'ScatterplotLayer',
+                        data=map_data,
+                        get_position='[longitude, latitude]',
+                        get_color='[200, 30, 0, 160]',
+                        get_radius=200,
+                        pickable=True,
+                        auto_highlight=True,
+                    ),
+                ],
+                tooltip={
+                    "html": "<b>Truck ID:</b> {truck_id}<br/><b>Driver:</b> {driver}<br/><b>Capacity:</b> {capacity}%",
+                    "style": {"backgroundColor": "steelblue", "color": "white"}
+                }
+            ))
+        else:
+            st.warning("Location data not available")
     else:
-        st.warning("Location data not available")
+        # Default view
+        st.header("Fleet Locations")
+        if df is not None and 'latitude' in df.columns and 'longitude' in df.columns:
+            st.pydeck_chart(pdk.Deck(
+                map_style='mapbox://styles/mapbox/light-v9',
+                initial_view_state=pdk.ViewState(
+                    latitude=df['latitude'].mean(),
+                    longitude=df['longitude'].mean(),
+                    zoom=11,
+                    pitch=50,
+                ),
+                layers=[
+                    pdk.Layer(
+                        'ScatterplotLayer',
+                        data=df,
+                        get_position='[longitude, latitude]',
+                        get_color='[200, 30, 0, 160]',
+                        get_radius=200,
+                    ),
+                ],
+            ))
+        else:
+            st.warning("Location data not available")
 
 with tab3:
-    # Assignments Tab
-    st.header("Driver Assignments")
-    if df is not None and 'truck_id' in df.columns:
-        # Assignment interface would go here
-        st.write("Assignment interface coming soon")
+    # Assignments Tab - Customized based on user role
+    if user_role == 'Dispatcher':
+        st.header("Driver Assignments")
+        st.markdown("Assign drivers to jobs and manage current assignments.")
+        
+        if df is not None:
+            # Show assignment interface
+            st.subheader("Current Assignments")
+            # Filter to show only relevant columns for assignments
+            assignment_cols = [col for col in ['job_id', 'driver', 'truck_id', 'status'] if col in df.columns]
+            if assignment_cols:
+                st.dataframe(df[assignment_cols], use_container_width=True)
+            else:
+                st.dataframe(df, use_container_width=True)
+            
+            # Add assignment controls
+            st.subheader("Assign Driver to Job")
+            with st.form("assignment_form"):
+                job_id = st.selectbox("Select Job", df['job_id'].unique() if 'job_id' in df.columns else [])
+                driver = st.selectbox("Select Driver", df['driver'].unique() if 'driver' in df.columns else [])
+                truck_id = st.selectbox("Select Truck", df['truck_id'].unique() if 'truck_id' in df.columns else [])
+                submitted = st.form_submit_button("Assign")
+                if submitted:
+                    st.success(f"Assigned {driver} with truck {truck_id} to job {job_id}")
+        else:
+            st.warning("Assignment data not available")
+            
+    elif user_role == 'Operations Manager':
+        st.header("Capacity Planning")
+        st.markdown("Manage resource allocation and view flagged issues.")
+        
+        if df is not None:
+            # Show capacity planning interface
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("Resource Allocation")
+                # Show a simple capacity chart
+                if 'driver' in df.columns:
+                    driver_counts = df['driver'].value_counts()
+                    st.bar_chart(driver_counts)
+                
+                # Add controls to block parts of the schedule
+                st.subheader("Schedule Blocking")
+                with st.form("block_schedule"):
+                    block_date = st.date_input("Date to block")
+                    block_reason = st.text_input("Reason for blocking")
+                    block_submitted = st.form_submit_button("Block Schedule")
+                    if block_submitted:
+                        st.success(f"Blocked schedule for {block_date} due to: {block_reason}")
+            
+            with col2:
+                st.subheader("Flagged Issues")
+                # Show flagged issues (for now, just showing all data as potential issues)
+                st.dataframe(df, use_container_width=True)
+                
+                # Add a way to flag new issues
+                st.subheader("Flag New Issue")
+                with st.form("flag_issue"):
+                    issue_job_id = st.selectbox("Select Job", df['job_id'].unique() if 'job_id' in df.columns else [])
+                    issue_description = st.text_area("Issue Description")
+                    issue_priority = st.select_slider("Priority", options=["Low", "Medium", "High", "Critical"])
+                    flag_submitted = st.form_submit_button("Flag Issue")
+                    if flag_submitted:
+                        st.success(f"Flagged issue for job {issue_job_id} with priority {issue_priority}")
+        else:
+            st.warning("Capacity planning data not available")
     else:
-        st.warning("Assignment data not available")
+        # Default view
+        st.header("Driver Assignments")
+        if df is not None and 'truck_id' in df.columns:
+            # Assignment interface would go here
+            st.write("Assignment interface coming soon")
+        else:
+            st.warning("Assignment data not available")
 
 with tab4:
     # Analytics Tab Content
